@@ -1,0 +1,377 @@
+# XcodeGen spec for the WHOOP MG iPhone app (ARCHITECTURE.md 4.1, 9.1, 9.2). On a Mac:
+#   brew install xcodegen && cd app/ios && xcodegen generate && open MGApp.xcodeproj
+# Layout follows noop's project.yml (ryanbr/noop @ e580175, read for reference; nothing copied). Mac build (Nov 2026): the
+# bundle ids are the ones the xtool build installs, so the Xcode build updates Mo's phone in place and keeps his data:
+# APP_BUNDLE_ID, APP_GROUP_ID and the extension ids come from Config/Base.xcconfig (one place); no team is hard-coded and
+# nothing is signed here (CODE_SIGNING_ALLOWED=NO on the runner; ci/public-build/sign-on-pc.sh signs on Mo's PC).
+# Info.plist and entitlements files are regenerated from this file on every generate: change the keys here, not there.
+# Keys follow ios/xtool/Info.plist (the installed build) so the two builds are the same app.
+name: MGApp
+options:
+  deploymentTarget:
+    iOS: "17.0"
+  createIntermediateGroups: true
+  groupSortPosition: top
+  developmentLanguage: en
+# Project-level xcconfig: BUNDLE_ID_PREFIX, an empty DEVELOPMENT_TEAM, optional Secrets.xcconfig.
+configFiles:
+  Debug: Config/Base.xcconfig
+  Release: Config/Base.xcconfig
+settings:
+  base:
+    # Note Oct 17 2026 (audit 11.7): 0.1.0 is NOT the phone version. The phone is built by xtool from ios/xtool/Info.plist,
+    # whose version and name come from ios/xtool/VERSION (tools/gen_changelog.py). This XcodeGen project is the Mac/Xcode path only.
+    # The runner passes the real ones (ios/xtool/VERSION, a yyyymmddHHMM build number): ci/public-build/workflow.yml.
+    MARKETING_VERSION: "0.6.0"
+    CURRENT_PROJECT_VERSION: "1"
+    SWIFT_VERSION: "5.0"
+    SWIFT_STRICT_CONCURRENCY: minimal
+    CODE_SIGN_STYLE: Automatic
+    # HEALTHKIT = the same define xtool/Package.swift sets; SCREEN_TIME turns on the Family Controls code (xtool does not
+    # set it, so the xtool build is unchanged).
+    SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) HEALTHKIT SCREEN_TIME"
+    # APP_GROUP_ID (shared by the app and the extensions, read at runtime from the AppGroupIdentifier Info.plist key) is in
+    # Config/Base.xcconfig.
+  configs:
+    Release:
+      ONLY_ACTIVE_ARCH: NO
+packages:
+  # The only third-party dependency (ARCHITECTURE.md R2), pinned exactly, same as noop.
+  GRDB:
+    url: https://github.com/groue/GRDB.swift.git
+    exactVersion: 6.29.3
+  WhoopProtocol:
+    path: Packages/WhoopProtocol
+  MGDomain:
+    path: Packages/MGDomain
+  MGStore:
+    path: Packages/MGStore
+  MGBLE:
+    path: Packages/MGBLE
+  MGSignal:
+    path: Packages/MGSignal
+  MGContext:
+    path: Packages/MGContext
+  MGDesign:
+    path: Packages/MGDesign
+  MGSync:
+    path: Packages/MGSync
+  MGHealth:
+    path: Packages/MGHealth
+targets:
+  MGApp:
+    type: application
+    platform: iOS
+    deploymentTarget: "17.0"
+    sources:
+      - path: App
+        excludes:
+          - "Support/Info.plist"
+          - "Support/MGApp.entitlements"
+      - path: UI
+      # The one file the app and the widget extension both compile (snapshot format, single definition). Nothing
+      # else under Widgets/ belongs in the app: the rest has the extension's @main and WidgetKit code (WP-27).
+      - path: Widgets/Shared
+      # T9973: the user's own starting preset lists (git-ignored, never in the repo). Bundled when the file exists, else
+      # the app looks for the same file name in its Application Support folder (LocalPresetLoader).
+      - path: local/local-presets.json
+        optional: true
+    info:
+      path: App/Support/Info.plist
+      properties:
+        CFBundleDevelopmentRegion: $(DEVELOPMENT_LANGUAGE)
+        CFBundleDisplayName: HealthApp
+        CFBundleName: $(PRODUCT_NAME)
+        CFBundleExecutable: $(EXECUTABLE_NAME)
+        CFBundleIdentifier: $(PRODUCT_BUNDLE_IDENTIFIER)
+        CFBundleInfoDictionaryVersion: "6.0"
+        CFBundlePackageType: $(PRODUCT_BUNDLE_PACKAGE_TYPE)
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        # Settings > About shows the release name (ios/xtool/VERSION); the runner passes it.
+        HAReleaseName: $(HA_RELEASE_NAME)
+        LSRequiresIPhoneOS: true
+        LSApplicationCategoryType: public.app-category.healthcare-fitness
+        AppGroupIdentifier: $(APP_GROUP_ID)
+        UILaunchScreen: {}
+        ITSAppUsesNonExemptEncryption: false
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        NSBluetoothAlwaysUsageDescription: "Connects to your WHOOP strap to read heart rate, R-R intervals and sensor data. Data stays on your iPhone and your own PC."
+        NSHealthShareUsageDescription: "Reads your Apple Health data (blood pressure cuff, Watch, scale and others), keeping each value's source, to use next to your strap data. It stays on your iPhone and your own PC."
+        NSHealthUpdateUsageDescription: "Writes labelled strap summaries (heart rate, resting heart rate, HRV, caffeine, workouts, sleep) to Apple Health, only when you switch the Health mirror on in Settings."
+        NSCameraUsageDescription: "Scans the pairing code your PC Lab shows, to connect this app to your own PC."
+        NSMicrophoneUsageDescription: "Night sounds, only if you switch them on: the iPhone listens for coughs and snoring on the phone itself. Audio never leaves your iPhone."
+        NSLocalNetworkUsageDescription: "Reaches your own PC Lab over Tailscale to send your data and fetch results."
+        NSAlarmKitUsageDescription: "Alarms and smart wake: the iPhone alarm that backs up your strap alarms (Fajr, wake, alarms, timers), and the smart wake inside your wake window."
+        NSLocationWhenInUseUsageDescription: "Fajr wake and Places: works out Fajr and sunrise for where you are, and sets a saved place (Home, Work, Gym, a field) where you stand. Read once when you tap Use my location or Use my current location, and kept on this phone."
+        NSLocationAlwaysAndWhenInUseUsageDescription: "Places, only if you switch on Notice where I am: iOS tells HealthApp when you arrive at or leave a place you saved, also in the background, using region monitoring and visits (no continuous GPS), so a workout can be tagged with where it happened. Kept on this phone."
+        NSCalendarsFullAccessUsageDescription: "Calendar buzz: reads the calendars you pick so the strap can buzz when an event starts. The app never changes your calendars."
+        NSRemindersFullAccessUsageDescription: "Reminder buzz: reads the reminder lists you pick so the strap can buzz when one is due. Tasks: adds a reminder only when you tap Add to Reminders on a task. The app never edits or removes your reminders."
+        # Plain HTTP only to local / unqualified host names (the Tailscale MagicDNS short name, route B of
+        # BRIEF.md's D4 override). No arbitrary loads.
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
+        UIBackgroundModes:
+          - bluetooth-central
+          - fetch
+          - processing
+          - audio
+        # Registered at launch by App/Background (WP-24); ids must match exactly (ARCHITECTURE.md 4.11).
+        # Same ids as ios/xtool/Info.plist (the code takes them from this list, never from the bundle id).
+        BGTaskSchedulerPermittedIdentifiers:
+          - $(APP_BASE_ID).sync
+          - $(APP_BASE_ID).compute
+          - $(APP_BASE_ID).rawupload
+          - $(APP_BASE_ID).healthread
+        # mgapp:// for pairing links (mgapp://pair?v=1&base=...&token=...) and intents.
+        CFBundleURLTypes:
+          - CFBundleURLName: $(APP_BASE_ID)
+            CFBundleURLSchemes:
+              - mgapp
+              - healthapp
+    entitlements:
+      path: App/Support/MGApp.entitlements
+      properties:
+        com.apple.developer.healthkit: true
+        com.apple.developer.healthkit.access: []
+        # May be dropped by free-account re-signing (noop CHANGELOG, #348): the app then shows Health blank with
+        # the reason (ARCHITECTURE.md 4.10).
+        com.apple.developer.healthkit.background-delivery: true
+        # T9816: the paid developer account exists (2026-10-15), so the timer / alarm notifications can be time-sensitive
+        # (they already set interruptionLevel = .timeSensitive; without this entitlement iOS treats them as active).
+        com.apple.developer.usernotifications.time-sensitive: true
+        # Screen Time (Family Controls); needs the capability on the App ID (ci/public-build/README.md).
+        com.apple.developer.family-controls: true
+        com.apple.security.application-groups:
+          - $(APP_GROUP_ID)
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: $(APP_BUNDLE_ID)
+        # The installed app is HealthApp.app (xtool); the Swift module stays MGApp so Tests/AppTests keep importing it.
+        PRODUCT_NAME: HealthApp
+        PRODUCT_MODULE_NAME: MGApp
+        TARGETED_DEVICE_FAMILY: "1"
+        GENERATE_INFOPLIST_FILE: NO
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+    dependencies:
+      - package: MGDomain
+      - package: MGStore
+      - package: MGBLE
+      - package: MGSignal
+      - package: MGContext
+      - package: MGDesign
+      - package: MGSync
+      - package: MGHealth
+      # Embeds the widget extension in HealthApp.app/PlugIns (XcodeGen embeds app extensions by default).
+      - target: MGWidgets
+      - target: MGActivityMonitor
+      # ExtensionKit extension: embedded in HealthApp.app/Extensions.
+      - target: MGActivityReport
+      # Watch app "Health Rec": embedded in HealthApp.app/Watch.
+      - target: HealthWatch
+  # Home Screen + Lock Screen widgets and Control Center controls (WP-27; spec in Widgets/PROJECT-TARGET.yml,
+  # applied here by WP-03 with main's approval 2026-10-11).
+  MGWidgets:
+    type: app-extension
+    platform: iOS
+    deploymentTarget: "17.0"
+    sources:
+      - path: Widgets
+        excludes:
+          - "PROJECT-TARGET.yml"
+          - "Support/Info.plist"
+          - "Support/MGWidgets.entitlements"
+      # WP-24's pending-intents queue and event builders, compiled in unchanged (they import only Foundation and
+      # MGDomain). The other App/Intents files import MGSync and app UI types and must stay out.
+      - path: App/Intents/IntentsQueue.swift
+      - path: App/Intents/IntentsEvents.swift
+    info:
+      path: Widgets/Support/Info.plist
+      properties:
+        CFBundleDevelopmentRegion: $(DEVELOPMENT_LANGUAGE)
+        CFBundleDisplayName: MG
+        CFBundleName: $(PRODUCT_NAME)
+        CFBundleExecutable: $(EXECUTABLE_NAME)
+        CFBundleIdentifier: $(PRODUCT_BUNDLE_IDENTIFIER)
+        CFBundleInfoDictionaryVersion: "6.0"
+        CFBundlePackageType: $(PRODUCT_BUNDLE_PACKAGE_TYPE)
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        AppGroupIdentifier: $(APP_GROUP_ID)
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
+    entitlements:
+      path: Widgets/Support/MGWidgets.entitlements
+      properties:
+        com.apple.security.application-groups:
+          - $(APP_GROUP_ID)
+    settings:
+      base:
+        # An extension's bundle id must start with its app's.
+        PRODUCT_BUNDLE_IDENTIFIER: $(APP_BUNDLE_ID).widgets
+        PRODUCT_NAME: MGWidgets
+        TARGETED_DEVICE_FAMILY: "1"
+        GENERATE_INFOPLIST_FILE: NO
+        SKIP_INSTALL: YES
+    dependencies:
+      - package: MGDomain
+  # Screen Time (Family Controls), Mac build. Shares one Foundation-only file with the app (App/ScreenTime/ScreenTimeShared.swift).
+  MGActivityMonitor:
+    type: app-extension
+    platform: iOS
+    deploymentTarget: "17.0"
+    sources:
+      - path: Extensions/ActivityMonitor
+        excludes:
+          - "Support"
+      - path: App/ScreenTime/ScreenTimeShared.swift
+    info:
+      path: Extensions/ActivityMonitor/Support/Info.plist
+      properties:
+        CFBundleDevelopmentRegion: $(DEVELOPMENT_LANGUAGE)
+        CFBundleDisplayName: Screen Time monitor
+        CFBundleName: $(PRODUCT_NAME)
+        CFBundleExecutable: $(EXECUTABLE_NAME)
+        CFBundleIdentifier: $(PRODUCT_BUNDLE_IDENTIFIER)
+        CFBundleInfoDictionaryVersion: "6.0"
+        CFBundlePackageType: $(PRODUCT_BUNDLE_PACKAGE_TYPE)
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        AppGroupIdentifier: $(APP_GROUP_ID)
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.deviceactivity.monitor-extension
+          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).ActivityMonitorExtension
+    entitlements:
+      path: Extensions/ActivityMonitor/Support/MGActivityMonitor.entitlements
+      properties:
+        com.apple.developer.family-controls: true
+        com.apple.security.application-groups:
+          - $(APP_GROUP_ID)
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: $(APP_BUNDLE_ID).activitymonitor
+        PRODUCT_NAME: MGActivityMonitor
+        TARGETED_DEVICE_FAMILY: "1"
+        GENERATE_INFOPLIST_FILE: NO
+        SKIP_INSTALL: YES
+  MGActivityReport:
+    type: extensionkit-extension
+    platform: iOS
+    deploymentTarget: "17.0"
+    sources:
+      - path: Extensions/ActivityReport
+        excludes:
+          - "Support"
+    info:
+      path: Extensions/ActivityReport/Support/Info.plist
+      properties:
+        CFBundleDevelopmentRegion: $(DEVELOPMENT_LANGUAGE)
+        CFBundleDisplayName: Screen Time report
+        CFBundleName: $(PRODUCT_NAME)
+        CFBundleExecutable: $(EXECUTABLE_NAME)
+        CFBundleIdentifier: $(PRODUCT_BUNDLE_IDENTIFIER)
+        CFBundleInfoDictionaryVersion: "6.0"
+        CFBundlePackageType: $(PRODUCT_BUNDLE_PACKAGE_TYPE)
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        AppGroupIdentifier: $(APP_GROUP_ID)
+        EXAppExtensionAttributes:
+          EXExtensionPointIdentifier: com.apple.deviceactivityui.report-extension
+    entitlements:
+      path: Extensions/ActivityReport/Support/MGActivityReport.entitlements
+      properties:
+        com.apple.developer.family-controls: true
+        com.apple.security.application-groups:
+          - $(APP_GROUP_ID)
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: $(APP_BUNDLE_ID).activityreport
+        PRODUCT_NAME: MGActivityReport
+        TARGETED_DEVICE_FAMILY: "1"
+        GENERATE_INFOPLIST_FILE: NO
+        SKIP_INSTALL: YES
+    dependencies:
+      # The report looks like the rest of the app (cards, fonts, themes).
+      - package: MGDesign
+      - package: MGContext
+      - package: MGDomain
+  # Apple Watch "Health Rec" (copied from the watch/ project, built by xtool's experimental watchOS branch until now).
+  # Records heart rate and motion on the Watch and hands files to the phone app (WatchConnectivity, App/Background/WatchReceiver).
+  HealthWatch:
+    type: application
+    platform: watchOS
+    deploymentTarget: "10.0"
+    sources:
+      - path: Watch/HealthWatch/Sources/HealthWatch
+    info:
+      path: Watch/HealthWatch/Support/Info.plist
+      properties:
+        CFBundleDevelopmentRegion: $(DEVELOPMENT_LANGUAGE)
+        CFBundleDisplayName: Health Rec
+        CFBundleName: $(PRODUCT_NAME)
+        CFBundleExecutable: $(EXECUTABLE_NAME)
+        CFBundleIdentifier: $(PRODUCT_BUNDLE_IDENTIFIER)
+        CFBundleInfoDictionaryVersion: "6.0"
+        CFBundlePackageType: $(PRODUCT_BUNDLE_PACKAGE_TYPE)
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        WKApplication: true
+        # The phone app this one is the companion of; it still installs and runs on its own.
+        WKCompanionAppBundleIdentifier: $(APP_BUNDLE_ID)
+        WKRunsIndependentlyOfCompanionApp: true
+        # Keeps the app running while a workout session is active (needed for CMBatchedSensorManager).
+        WKBackgroundModes:
+          - workout-processing
+        NSHealthShareUsageDescription: "Reads the heart rate your Watch measures during a recording, to send it to your own PC."
+        NSHealthUpdateUsageDescription: "Saves each recording as a workout so the Watch measures heart rate during it."
+        NSMotionUsageDescription: "Records the motion sensors of the Watch during a recording and in the background, to send to your own PC."
+    entitlements:
+      path: Watch/HealthWatch/Support/HealthWatch.entitlements
+      properties:
+        com.apple.developer.healthkit: true
+        com.apple.developer.healthkit.access: []
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: $(APP_BUNDLE_ID).watchkitapp
+        PRODUCT_NAME: HealthWatch
+        SDKROOT: watchos
+        TARGETED_DEVICE_FAMILY: "4"
+        GENERATE_INFOPLIST_FILE: NO
+        SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) HEALTHKIT"
+  MGAppTests:
+    type: bundle.unit-test
+    platform: iOS
+    deploymentTarget: "17.0"
+    sources:
+      # Each work package writes its app tests in its own subfolder (ARCHITECTURE.md 3). optional: the
+      # project still generates before any exist.
+      - path: Tests/AppTests
+        optional: true
+    dependencies:
+      - target: MGApp
+      # Value types only, so linking it into the test bundle too duplicates no state. Add other packages
+      # only if a test imports them directly (each would be a second static copy with its own globals).
+      - package: MGDomain
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: $(APP_BUNDLE_ID).tests
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/HealthApp.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/HealthApp"
+        BUNDLE_LOADER: "$(TEST_HOST)"
+schemes:
+  MGApp:
+    build:
+      targets:
+        MGApp: all
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets:
+        - MGAppTests
+    archive:
+      config: Release

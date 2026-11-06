@@ -1,0 +1,5 @@
+# build output
+ios/build/
+ios/MGApp.xcodeproj/
+out/
+.DS_Store

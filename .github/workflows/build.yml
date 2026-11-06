@@ -1,0 +1,149 @@
+# Becomes .github/workflows/build.yml in the PUBLIC build-only repo (ci/public-build/export.sh puts it there).
+# Builds HealthApp with Xcode on a GitHub macOS runner and uploads the UNSIGNED .app (with its extensions, the Watch app and
+# the generated Metadata.appintents) plus the entitlements each bundle needs. Signing happens on Mo's PC
+# (ci/public-build/sign-on-pc.sh in the private repo): the signing key and the Apple account never go online.
+#
+# WRITTEN, NOT RUN. Based on .github/workflows/ios-unsigned-ipa.yml and ci/build-ipa.sh of the private repo, without the
+# tests, the package matrix and the reachability scan (macOS minutes cost 10x on private repos; this repo is public, so the
+# minutes are free, but the run stays short anyway: 45 minute limit, cached SwiftPM and DerivedData).
+#
+# Nothing secret is used: no secrets, a read-only token, no signing identity.
+name: Build unsigned app
+
+on:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Xcode archive (unsigned)
+    runs-on: macos-26
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Tool versions
+        run: |
+          sw_vers
+          xcodebuild -version
+          xcrun --sdk iphoneos --show-sdk-version
+          xcrun --sdk watchos --show-sdk-version
+
+      - name: Install XcodeGen
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: "1"
+          HOMEBREW_NO_INSTALL_CLEANUP: "1"
+        run: brew install xcodegen
+
+      # SwiftPM checkouts (GRDB) and the build products: the first run is slow, later ones reuse them.
+      - name: Cache SwiftPM and DerivedData
+        uses: actions/cache@v4
+        with:
+          path: |
+            ios/build/SourcePackages
+            ios/build/DerivedData
+          key: xcode-${{ hashFiles('ios/project.yml', 'ios/Packages/*/Package.swift') }}-${{ github.run_id }}
+          restore-keys: |
+            xcode-${{ hashFiles('ios/project.yml', 'ios/Packages/*/Package.swift') }}-
+
+      # Version and release name as the installed (xtool) build has them: ios/xtool/VERSION = "0.6.0.13 Release name".
+      - name: Version
+        id: ver
+        run: |
+          line="$(head -n 1 ios/xtool/VERSION)"
+          full="${line%% *}"
+          echo "marketing=$(echo "$full" | cut -d. -f1-3)" >> "$GITHUB_OUTPUT"
+          echo "build=$(date -u +%Y%m%d%H%M)" >> "$GITHUB_OUTPUT"
+          echo "name=${line#* }" >> "$GITHUB_OUTPUT"
+          echo "full=$full" >> "$GITHUB_OUTPUT"
+
+      - name: Generate the Xcode project
+        working-directory: ios
+        run: xcodegen generate
+
+      - name: Archive (Release, unsigned, generic iOS device)
+        working-directory: ios
+        env:
+          MARKETING: ${{ steps.ver.outputs.marketing }}
+          BUILDNO: ${{ steps.ver.outputs.build }}
+          RELNAME: ${{ steps.ver.outputs.name }}
+        run: |
+          set -o pipefail
+          mkdir -p build
+          xcodebuild archive \
+            -project MGApp.xcodeproj -scheme MGApp -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -archivePath build/HealthApp.xcarchive \
+            -derivedDataPath build/DerivedData \
+            -clonedSourcePackagesDirPath build/SourcePackages \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            MARKETING_VERSION="$MARKETING" CURRENT_PROJECT_VERSION="$BUILDNO" HA_RELEASE_NAME="$RELNAME" \
+            2>&1 | tee build/build.log | tail -n 200
+
+      # Pack the .app and fail loudly when something the Mac build exists for is missing.
+      - name: Pack and check
+        run: |
+          set -euo pipefail
+          out="$PWD/out"; mkdir -p "$out/Payload"
+          app="$(find ios/build/HealthApp.xcarchive/Products/Applications -maxdepth 1 -name '*.app' -type d)"
+          [ "$(echo "$app" | wc -l)" = 1 ] || { echo "::error::expected exactly one .app in the archive"; exit 1; }
+          ditto "$app" "$out/Payload/HealthApp.app"
+          A="$out/Payload/HealthApp.app"
+          PB=/usr/libexec/PlistBuddy
+          fail=0
+          check() { if [ ! -e "$1" ]; then echo "::error::missing in the build: $1"; fail=1; else echo "ok: $1"; fi; }
+          check "$A/PlugIns/MGWidgets.appex"
+          check "$A/PlugIns/MGActivityMonitor.appex"
+          check "$A/Extensions/MGActivityReport.appex"
+          check "$A/Watch/HealthWatch.app"
+          # Xcode writes Metadata.appintents (App Intents for Siri / Shortcuts / Action Button) next to the binary.
+          if [ -z "$(find "$A" -name 'Metadata.appintents' -maxdepth 3 | head -n 1)" ]; then
+            echo "::error::no Metadata.appintents in the app (App Intents metadata was not generated)"; fail=1
+          else echo "ok: Metadata.appintents"; fi
+          echo "bundle ids:"
+          for b in "$A" "$A"/PlugIns/*.appex "$A"/Extensions/*.appex "$A"/Watch/*.app; do
+            id="$("$PB" -c 'Print :CFBundleIdentifier' "$b/Info.plist")"
+            echo "  $id   ($(basename "$b"))"
+            case "$id" in *'$('*) echo "::error::unexpanded variable in $b"; fail=1 ;; esac
+          done
+          [ "$fail" = 0 ] || exit 1
+          bash ci/collect-entitlements.sh ios "$out/entitlements"
+          ( cd "$out" && ditto -c -k --keepParent Payload HealthApp-unsigned.zip && rm -rf Payload \
+            && shasum -a 256 HealthApp-unsigned.zip > SHA256SUMS && cat SHA256SUMS )
+          {
+            echo "### HealthApp-unsigned.zip"
+            echo
+            echo "Version ${{ steps.ver.outputs.full }} (build ${{ steps.ver.outputs.build }}). Download the artifact, then sign on the PC."
+            echo
+            echo '```'; cat "$out/SHA256SUMS"; echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload unsigned app
+        uses: actions/upload-artifact@v4
+        with:
+          name: HealthApp-unsigned
+          path: |
+            out/HealthApp-unsigned.zip
+            out/SHA256SUMS
+            out/entitlements/
+          if-no-files-found: error
+          retention-days: 14
+
+      # The full xcodebuild log, kept when the build fails so the first compile errors can be read.
+      - name: Upload build log (on failure)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: ios/build/build.log
+          if-no-files-found: ignore
+          retention-days: 14

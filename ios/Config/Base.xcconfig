@@ -1,0 +1,18 @@
+// Project-wide settings for MGApp (project.yml configFiles, Debug and Release; every target inherits them).
+//
+// Mac build (Nov 2026): the identity of the app xtool installs on Mo's phone, so this build updates it in place and keeps its
+// data. xtool installs it as XTL-<team>.<id> (ProvisioningIdentifiers.idPrefix) and names the App Group the same way
+// (group.XTL-<team>.<id>, xtool Sources/XKit/Utilities/ProvisioningIdentifiers.swift). Change the ids HERE only.
+APP_BASE_ID = com.mofarah.healthapp
+APP_BUNDLE_ID = XTL-6QA5P39Q9D.$(APP_BASE_ID)
+APP_GROUP_ID = group.XTL-6QA5P39Q9D.$(APP_BASE_ID)
+// Extensions and the Watch app: $(APP_BUNDLE_ID).widgets / .activitymonitor / .activityreport / .watchkitapp (project.yml).
+// Release name for Settings > About; the runner overrides it from ios/xtool/VERSION.
+HA_RELEASE_NAME = Mac build
+BUNDLE_ID_PREFIX = com.example.mg
+
+// Empty on purpose: no team is hard-coded. Set DEVELOPMENT_TEAM in Secrets.xcconfig, or pick a team in Xcode
+// (Signing & Capabilities) after each `xcodegen generate`.
+DEVELOPMENT_TEAM =
+
+#include? "Secrets.xcconfig"
