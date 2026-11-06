@@ -72,10 +72,9 @@ targets:
       # The one file the app and the widget extension both compile (snapshot format, single definition). Nothing
       # else under Widgets/ belongs in the app: the rest has the extension's @main and WidgetKit code (WP-27).
       - path: Widgets/Shared
-      # T9973: the user's own starting preset lists (git-ignored, never in the repo). Bundled when the file exists, else
-      # the app looks for the same file name in its Application Support folder (LocalPresetLoader).
-      - path: local/local-presets.json
-        optional: true
+      # T9973: the user's own starting preset lists (git-ignored, never in the repo). Nov 6 2026: no longer bundled by the Mac
+      # build (XcodeGen kept a reference to the missing file and the first runner build failed on it); the app reads the
+      # same file name from its Application Support folder (LocalPresetLoader), which is where the phone copy lives.
     info:
       path: App/Support/Info.plist
       properties:
